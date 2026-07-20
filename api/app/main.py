@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 from api.app.routers import scan, resources, drift
 
-from api.app.core.database import Base, engine, wait_for_db
-from api.app.models import scan as scan_model
+from common.database import Base, engine, wait_for_db
+from common.models import scan as scan_model
 
 wait_for_db()
 Base.metadata.create_all(bind=engine)

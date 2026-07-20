@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from api.app.core.database import get_db
-from api.app.models.scan import Scan
+from common.database import get_db
+from common.models.scan import Scan
 
 router = APIRouter(
     prefix = "/scan",
@@ -15,7 +15,6 @@ def trigger_scan(db: Session = Depends(get_db)):
     db.add(scan)
     db.commit()
     db.refresh(scan)
-    #Placeholder: will eventually enque a real AWS scan
     return {"scan_id": scan.id, "status": scan.status}
 
 @router.get("/status/{scan_id}")

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import Column, String, DateTime
 
-from api.app.core.database import Base
+from common.database import Base
 
 
 
