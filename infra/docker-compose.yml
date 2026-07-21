@@ -19,5 +19,22 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+
+  scanner:
+    build:
+      context: ..
+      dockerfile: infra/docker/scanner.Dockerfile
+    environment:
+      - DATABASE_URL=postgresql://ciop:${DB_PASSWORD}@db:5432/ciop
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+    depends_on:
+      - db
+    profiles:
+      - tools
+
 volumes:
   pgdata:
+
+  
