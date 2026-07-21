@@ -1,6 +1,7 @@
 from common.database import SessionLocal, wait_for_db
 from common.models.scan import Scan
-from scanner.src.aws_discovery import discover_ec2_instances, discover_s3_buckets
+from common.models.resource import Resource
+from scanner.src.aws_discovery import discover_all
 
 
 def claim_pending_scan(db) -> Scan | None:
@@ -18,23 +19,32 @@ def claim_pending_scan(db) -> Scan | None:
 def main():
     wait_for_db()
     db = SessionLocal()
-
+    scan = None
     try:
         scan = claim_pending_scan(db)
         if scan is None:
             print("No pending scans. Exiting.")
             return
-        
+
         print(f"Running scan {scan.id}...")
-        resources = discover_ec2_instances() + discover_s3_buckets()
-        print(f"Discovered {len(resources)} resources.")
-        for r in resources:
-            print(f" - {r['resource_type']}: {r['resource_id']}")
+        discovered = discover_all()
+
+        for item in discovered:
+            db.add(
+                Resource(
+                    scan_id=scan.id,
+                    resource_type=item["resource_type"],
+                    resource_id=item["resource_id"],
+                    region=item["region"],
+                    details=item["details"],
+                )
+            )
 
         scan.status = "complete"
         db.commit()
-        print(f"Scan {scan.id} complete.")
+        print(f"Scan {scan.id} complete: {len(discovered)} resources saved.")
     except Exception:
+        db.rollback()
         if scan is not None:
             scan.status = "failed"
             db.commit()
