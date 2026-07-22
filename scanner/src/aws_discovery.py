@@ -30,15 +30,25 @@ def discover_ec2_instances(region: str) -> list[dict]:
 def discover_s3_buckets() -> list[dict]:
     s3 = boto3.client("s3")
     response = s3.list_buckets()
-    return [
-        {
-            "resource_type": "s3_bucket",
-            "resource_id": bucket["Name"],
-            "region": None,
-            "details": {"created_at": bucket["CreationDate"].isoformat()},
-        }
-        for bucket in response["Buckets"]
-    ]
+
+    buckets = []
+
+    for bucket in response["Buckets"]:
+        location = s3.get_bucket_location(Bucket=bucket["Name"])
+        region = location["LocationConstraint"] or "us-east-1"
+
+        buckets.append(
+            {
+                "resource_type": "s3_bucket",
+                "resource_id": bucket["Name"],
+                "region": region,
+                "details": {
+                    "created_at": bucket["CreationDate"].isoformat(),
+                },
+            }
+        )
+
+    return buckets
 
 def discover_all() -> list[dict]:
     resources = []
