@@ -34,6 +34,20 @@ services:
     profiles:
       - tools
 
+  sync:
+    build:
+      context: ..
+      dockerfile: infra/docker/sync.Dockerfile
+    environment:
+      - DATABASE_URL=postgresql://ciop:${DB_PASSWORD}@db:5432/ciop
+      - SERVICENOW_INSTANCE=${SERVICENOW_INSTANCE}
+      - SERVICENOW_USER=${SERVICENOW_USER}
+      - SERVICENOW_PASSWORD=${SERVICENOW_PASSWORD}
+    depends_on:
+      - db
+    profiles:
+      - tools
+
 volumes:
   pgdata:
 
