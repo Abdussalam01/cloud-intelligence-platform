@@ -6,6 +6,12 @@ from common.models import scan as scan_model
 
 from common.models import resource as resource_model
 
+from common.models import sync_run as sync_model
+
+from common.models import drift as drift_model
+
+from common.models import detection_run as detection_model
+
 wait_for_db()
 Base.metadata.create_all(bind=engine)
 

@@ -1,12 +1,12 @@
+from datetime import datetime, timezone
+
 from common.database import SessionLocal, wait_for_db
 from common.models.scan import Scan
 from common.models.resource import Resource
-from sync.src.snow_client import ServiceNowClient
+from common.models.sync_run import SyncRun
+from common.servicenow.snow_client import ServiceNowClient
+from common.servicenow.snow_mapping import MANAGED_TAG, TYPE_TO_TABLE
 
-TYPE_TO_TABLE = {
-    "ec2_instance": "cmdb_ci_vm_instance",
-    "s3_bucket": "cmdb_ci_cloud_storage_account",
-}
 
 EC2_STATE_MAP = {
     "running": "On",
@@ -17,10 +17,9 @@ EC2_STATE_MAP = {
     "terminated": "Terminated",
 }
 
-MANAGED_TAG = "CIOP"
 
 
-def get_current_resources(db) -> list[Resource]:
+def get_current_state(db) -> tuple[Scan | None, list[Resource]]:
     latest = (
         db.query(Scan)
         .filter(Scan.status == "complete")
@@ -28,8 +27,9 @@ def get_current_resources(db) -> list[Resource]:
         .first()
     )
     if latest is None:
-        return []
-    return db.query(Resource).filter(Resource.scan_id == latest.id).all()
+        return None, []
+    resources = db.query(Resource).filter(Resource.scan_id == latest.id).all()
+    return latest, resources
 
 
 def build_payload(resource: Resource) -> dict:
@@ -49,8 +49,12 @@ def build_payload(resource: Resource) -> dict:
     return payload
 
 
-def sync_resources(client: ServiceNowClient, resources: list[Resource]) -> set[str]:
+def sync_resources(
+    client: ServiceNowClient, resources: list[Resource]
+) -> tuple[set[str], int, int]:
     seen_ids = set()
+    created = 0
+    updated = 0
     for resource in resources:
         table = TYPE_TO_TABLE.get(resource.resource_type)
         if table is None:
@@ -67,14 +71,17 @@ def sync_resources(client: ServiceNowClient, resources: list[Resource]) -> set[s
 
         if existing:
             client.update(table, existing[0]["sys_id"], payload)
+            updated += 1
             print(f"  updated  {resource.resource_type} {resource.resource_id}")
         else:
             client.create(table, payload)
+            created += 1
             print(f"  created  {resource.resource_type} {resource.resource_id}")
-    return seen_ids
+    return seen_ids, created, updated
 
 
-def retire_missing(client: ServiceNowClient, seen_ids: set[str]):
+def retire_missing(client: ServiceNowClient, seen_ids: set[str]) -> int:
+    retired = 0
     for table in set(TYPE_TO_TABLE.values()):
         managed = client.query(
             table,
@@ -84,22 +91,45 @@ def retire_missing(client: ServiceNowClient, seen_ids: set[str]):
         for ci in managed:
             if ci["correlation_id"] not in seen_ids:
                 client.update(table, ci["sys_id"], {"install_status": "7"})  # 7 = Retired
+                retired += 1
                 print(f"  retired  {ci['correlation_id']}")
+    return retired
 
 
 def main():
     wait_for_db()
     db = SessionLocal()
+    run = None
     try:
-        resources = get_current_resources(db)
-        if not resources:
+        latest_scan, resources = get_current_state(db)
+        if latest_scan is None:
             print("No completed scans found. Exiting.")
             return
-        print(f"Syncing {len(resources)} resources to ServiceNow...")
+
+        run = SyncRun(scan_id=latest_scan.id)
+        db.add(run)
+        db.commit()
+        print(f"Sync run {run.id} started for scan {latest_scan.id}")
+
         client = ServiceNowClient()
-        seen = sync_resources(client, resources)
-        retire_missing(client, seen)
-        print("Sync complete.")
+        seen, created, updated = sync_resources(client, resources)
+        retired = retire_missing(client, seen)
+
+        run.created_count = created
+        run.updated_count = updated
+        run.retired_count = retired
+        run.status = "complete"
+        run.finished_at = datetime.now(timezone.utc)
+        db.commit()
+        print(f"Sync complete: {created} created, {updated} updated, {retired} retired")
+    except Exception as exc:
+        db.rollback()
+        if run is not None:
+            run.status = "failed"
+            run.error = str(exc)[:500]
+            run.finished_at = datetime.now(timezone.utc)
+            db.commit()
+        raise
     finally:
         db.close()
 
